@@ -1,6 +1,6 @@
 CC = clang
-CFLAGS = -Wall -Wextra $(shell pkg-config --cflags libpq)
-LDFLAGS = $(shell pkg-config --libs libpq)
+CFLAGS = -Wall -Wextra `pkg-config --cflags libpq`
+LDFLAGS = `pkg-config --libs libpq`
 
 default: pg_listen
 
