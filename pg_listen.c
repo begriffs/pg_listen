@@ -5,7 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
-void		listen_forever(PGconn *, char *);
+void		listen_forever(PGconn *, char *, char *);
 int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
 void		begin_listen(PGconn *, char *);
@@ -18,9 +18,9 @@ main(int argc, char **argv)
 	PGconn	   *conn;
 	char	   *chan;
 
-	if (argc != 3)
+	if (argc != 4)
 	{
-		fprintf(stderr, "USAGE: %s db-url channel\n", argv[0]);
+		fprintf(stderr, "USAGE: %s db-url channel shell-command\n", argv[0]);
 		return 1;
 	}
 
@@ -37,7 +37,7 @@ main(int argc, char **argv)
 		fputs(PQerrorMessage(conn), stderr);
 		clean_and_die(conn);
 	}
-	listen_forever(conn, chan);
+	listen_forever(conn, chan, argv[3]);
 
 	/* should never get here */
 	PQfreemem(chan);
@@ -46,10 +46,11 @@ main(int argc, char **argv)
 }
 
 void
-listen_forever(PGconn *conn, char *chan)
+listen_forever(PGconn *conn, char *chan, char *cmd)
 {
 	PGnotify   *notify;
 	int			sock;
+	pid_t		pid;
 	struct pollfd pfd[1];
 
 	printf("Listening for channel %s\n", chan);
@@ -78,7 +79,10 @@ listen_forever(PGconn *conn, char *chan)
 		PQconsumeInput(conn);
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
-			printf("Got it\n");
+			pid = fork();
+			if (pid == 0)
+				exit(system(cmd));
+
 			PQfreemem(notify);
 		}
 	}
@@ -114,10 +118,10 @@ void
 begin_listen(PGconn *conn, char *chan)
 {
 	PGresult   *res;
-	char		cmd[7 + BUFSZ + 1];
+	char		sql[7 + BUFSZ + 1];
 
-	snprintf(cmd, 7 + BUFSZ + 1, "LISTEN %s", chan);
-	res = PQexec(conn, cmd);
+	snprintf(sql, 7 + BUFSZ + 1, "LISTEN %s", chan);
+	res = PQexec(conn, sql);
 
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
