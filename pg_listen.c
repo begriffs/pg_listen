@@ -58,7 +58,7 @@ listen_forever(PGconn *conn, char *chan)
 		fputs("Failed to allocate memory for sql", stderr);
 		clean_and_die(conn);
 	}
-	snprintf(cmd, 7 + chansz, "LISTEN %s", chan);
+	snprintf(cmd, 7 + chansz + 1, "LISTEN %s", chan);
 
 	res = PQexec(conn, cmd);
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
@@ -78,6 +78,8 @@ listen_forever(PGconn *conn, char *chan)
 			fprintf(stderr, "Failed to get libpq socket\n");
 			clean_and_die(conn);
 		}
+
+		printf("Listening for channel %s\n", chan);
 
 		/* wait for input that may have been caused */
 		/* by a NOTIFY event */
