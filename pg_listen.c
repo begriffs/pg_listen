@@ -1,11 +1,16 @@
+#include <libpq-fe.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libpq-fe.h>
-#include <poll.h>
+#include <unistd.h>
 
 void		listen_forever(PGconn *, char *);
+int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
+void		begin_listen(PGconn *, char *);
+
+const int	BUFSZ = 512;
 
 int
 main(int argc, char **argv)
@@ -26,7 +31,7 @@ main(int argc, char **argv)
 		clean_and_die(conn);
 	}
 
-	chan = PQescapeIdentifier(conn, argv[2], 512);
+	chan = PQescapeIdentifier(conn, argv[2], BUFSZ);
 	if (chan == NULL)
 	{
 		fputs(PQerrorMessage(conn), stderr);
@@ -44,23 +49,76 @@ void
 listen_forever(PGconn *conn, char *chan)
 {
 	PGnotify   *notify;
-	PGresult   *res;
-	int			nready,
-				sock,
-				chansz;
-	char	   *cmd;
+	int			sock;
 	struct pollfd pfd[1];
 
-	chansz = strlen(chan);
-	cmd = malloc((7 + chansz) * sizeof(char));
-	if (cmd == NULL)
-	{
-		fputs("Failed to allocate memory for sql", stderr);
-		clean_and_die(conn);
-	}
-	snprintf(cmd, 7 + chansz + 1, "LISTEN %s", chan);
+	printf("Listening for channel %s\n", chan);
+	begin_listen(conn, chan);
 
+	while (1)
+	{
+		if (reset_if_necessary(conn))
+			begin_listen(conn, chan);
+
+		sock = PQsocket(conn);
+		if (sock < 0)
+		{
+			fprintf(stderr, "Failed to get libpq socket\n");
+			clean_and_die(conn);
+		}
+
+		pfd[0].fd = sock;
+		pfd[0].events = POLLIN;
+		if (poll(pfd, 1, -1) < 0)
+		{
+			fprintf(stderr, "Poll() error\n");
+			clean_and_die(conn);
+		}
+
+		PQconsumeInput(conn);
+		while ((notify = PQnotifies(conn)) != NULL)
+		{
+			printf("Got it\n");
+			PQfreemem(notify);
+		}
+	}
+}
+
+int
+reset_if_necessary(PGconn *conn)
+{
+	unsigned int seconds = 0;
+
+	if (PQstatus(conn) == CONNECTION_OK)
+		return 0;
+
+	do
+	{
+		if (seconds == 0)
+			seconds = 1;
+		else
+		{
+			printf("Failed.\nSleeping %d seconds.\n", seconds);
+			sleep(seconds);
+			seconds *= 2;
+		}
+		printf("Reconnecting to database...");
+		PQreset(conn);
+	} while (PQstatus(conn) != CONNECTION_OK);
+
+	printf("Connected.\n");
+	return 1;
+}
+
+void
+begin_listen(PGconn *conn, char *chan)
+{
+	PGresult   *res;
+	char		cmd[7 + BUFSZ + 1];
+
+	snprintf(cmd, 7 + BUFSZ + 1, "LISTEN %s", chan);
 	res = PQexec(conn, cmd);
+
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
 		fprintf(stderr, "LISTEN command failed: %s", PQerrorMessage(conn));
@@ -68,35 +126,6 @@ listen_forever(PGconn *conn, char *chan)
 		clean_and_die(conn);
 	}
 	PQclear(res);
-
-	while (1)
-	{
-		sock = PQsocket(conn);
-
-		if (sock < 0)
-		{
-			fprintf(stderr, "Failed to get libpq socket\n");
-			clean_and_die(conn);
-		}
-
-		printf("Listening for channel %s\n", chan);
-
-		/* wait for input that may have been caused */
-		/* by a NOTIFY event */
-		pfd[0].fd = sock;
-		pfd[0].events = POLLIN;
-		nready = poll(pfd, 1, -1);
-
-		PQconsumeInput(conn);
-		while ((notify = PQnotifies(conn)) != NULL)
-		{
-			if (strcmp(notify->relname, chan) == 0)
-			{
-				printf("Got it\n");
-			}
-			PQfreemem(notify);
-		}
-	}
 }
 
 void
