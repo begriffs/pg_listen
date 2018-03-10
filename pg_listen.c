@@ -5,10 +5,10 @@
 #include <string.h>
 #include <unistd.h>
 
-void		listen_forever(PGconn *, char *, char *);
+void		listen_forever(PGconn *, const char *, const char *);
 int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
-void		begin_listen(PGconn *, char *);
+void		begin_listen(PGconn *, const char *);
 
 const int	BUFSZ = 512;
 
@@ -46,7 +46,7 @@ main(int argc, char **argv)
 }
 
 void
-listen_forever(PGconn *conn, char *chan, char *cmd)
+listen_forever(PGconn *conn, const char *chan, const char *cmd)
 {
 	PGnotify   *notify;
 	int			sock;
@@ -115,7 +115,7 @@ reset_if_necessary(PGconn *conn)
 }
 
 void
-begin_listen(PGconn *conn, char *chan)
+begin_listen(PGconn *conn, const char *chan)
 {
 	PGresult   *res;
 	char		sql[7 + BUFSZ + 1];
