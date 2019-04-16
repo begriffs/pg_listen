@@ -11,7 +11,7 @@ int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
 void		begin_listen(PGconn *, const char *);
 
-const int	BUFSZ = 512;
+#define		BUFSZ 512
 
 int
 main(int argc, char **argv)
@@ -46,7 +46,7 @@ main(int argc, char **argv)
 	return 0;
 }
 
-noreturn void
+void
 listen_forever(PGconn *conn, const char *chan, const char *cmd)
 {
 	PGnotify   *notify;
@@ -133,9 +133,9 @@ begin_listen(PGconn *conn, const char *chan)
 	PQclear(res);
 }
 
-noreturn void
+void
 clean_and_die(PGconn *conn)
 {
 	PQfinish(conn);
-	exit(1);
+	exit(EXIT_FAILURE);
 }
