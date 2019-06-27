@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <libpq-fe.h>
 #include <poll.h>
 #include <stdio.h>
@@ -65,15 +66,16 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd)
 		sock = PQsocket(conn);
 		if (sock < 0)
 		{
-			fprintf(stderr, "Failed to get libpq socket\n");
+			fprintf(stderr, "Failed to get libpq socket: %s\n",
+			        PQerrorMessage(conn));
 			clean_and_die(conn);
 		}
 
 		pfd[0].fd = sock;
 		pfd[0].events = POLLIN;
-		if (poll(pfd, 1, -1) < 0)
+		if (errno = 0, poll(pfd, 1, -1) < 0)
 		{
-			fprintf(stderr, "Poll() error\n");
+			perror("poll()");
 			clean_and_die(conn);
 		}
 
@@ -126,7 +128,7 @@ begin_listen(PGconn *conn, const char *chan)
 
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
-		fprintf(stderr, "LISTEN command failed: %s", PQerrorMessage(conn));
+		fprintf(stderr, "LISTEN command failed: %s\n", PQerrorMessage(conn));
 		PQclear(res);
 		clean_and_die(conn);
 	}
