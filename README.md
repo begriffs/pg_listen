@@ -5,10 +5,13 @@ Super fast and lightweight. Written in C using libpq.
 ### Usage
 
 ```bash
-pg_listen postgres://db-uri channel-name shell-command
+pg_listen postgres://db-uri channel /path/to/program [args]
 
-# for example
-# pg_listen postgres://localhost/postgres hello "echo they said hi"
+# for example, to note when NOTIFY happened on "hello" channel
+# pg_listen postgres://localhost/postgres hello /bin/echo they said hi
+
+# or to output the payload from the "fun" channel
+# pg_listen postgres://localhost/postgres fun /bin/cat -
 ```
 
 ### Building
