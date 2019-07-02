@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <libpq-fe.h>
 #include <poll.h>
 #include <stdio.h>
@@ -6,7 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
-void		listen_forever(PGconn *, const char *, const char *);
+void		listen_forever(PGconn *, const char *, const char *, char **);
 int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
 void		begin_listen(PGconn *, const char *);
@@ -19,10 +20,11 @@ main(int argc, char **argv)
 	PGconn	   *conn;
 	char	   *chan;
 
-	if (argc != 4)
+	if (argc < 4)
 	{
-		fprintf(stderr, "USAGE: %s db-url channel shell-command\n", argv[0]);
-		return 1;
+		fprintf(stderr, "USAGE: %s db-url channel /path/to/program [args]\n",
+		        argv[0]);
+		return EXIT_FAILURE;
 	}
 
 	conn = PQconnectdb(argv[1]);
@@ -38,7 +40,7 @@ main(int argc, char **argv)
 		fputs(PQerrorMessage(conn), stderr);
 		clean_and_die(conn);
 	}
-	listen_forever(conn, chan, argv[3]);
+	listen_forever(conn, chan, argv[3], argv+3);
 
 	/* should never get here */
 	PQfreemem(chan);
@@ -47,11 +49,11 @@ main(int argc, char **argv)
 }
 
 void
-listen_forever(PGconn *conn, const char *chan, const char *cmd)
+listen_forever(PGconn *conn, const char *chan, const char *cmd, char **args)
 {
 	PGnotify   *notify;
 	int			sock;
-	pid_t		pid;
+	int			pipefds[2];
 	struct pollfd pfd[1];
 
 	printf("Listening for channel %s\n", chan);
@@ -65,24 +67,64 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd)
 		sock = PQsocket(conn);
 		if (sock < 0)
 		{
-			fprintf(stderr, "Failed to get libpq socket\n");
+			fprintf(stderr, "Failed to get libpq socket: %s\n",
+			        PQerrorMessage(conn));
 			clean_and_die(conn);
 		}
 
 		pfd[0].fd = sock;
 		pfd[0].events = POLLIN;
-		if (poll(pfd, 1, -1) < 0)
+		if (errno = 0, poll(pfd, 1, -1) < 0)
 		{
-			fprintf(stderr, "Poll() error\n");
+			perror("poll()");
 			clean_and_die(conn);
 		}
 
 		PQconsumeInput(conn);
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
-			pid = fork();
-			if (pid == 0)
-				exit(system(cmd));
+			/* we'll send NOTIFY payload through pipe to stdin */
+			if (errno = 0, pipe(pipefds) < 0)
+			{
+				perror("pipe()");
+				PQfreemem(notify);
+				clean_and_die(conn);
+			}
+
+			switch (errno = 0, fork())
+			{
+				case -1:
+					perror("fork()");
+					PQfreemem(notify);
+					close(pipefds[0]);
+					close(pipefds[1]);
+					clean_and_die(conn);
+					break;
+				case 0: /* Child - reads from pipe */
+					/* Write end is unused */
+					close(pipefds[1]);
+					/* read from pipe as stdin */
+					if (errno = 0, dup2(pipefds[0], STDIN_FILENO) < 0)
+					{
+						perror("Unable to assign stdin to pipe");
+						close(pipefds[0]);
+						exit(EXIT_FAILURE);
+					}
+					if (errno = 0, execv(cmd, args) < 0)
+					{
+						fprintf(stderr, "Can't run %s: %s\n",
+						        cmd, strerror(errno));
+						close(pipefds[0]);
+						exit(EXIT_FAILURE);
+					}
+					/* should not get here */
+					break;
+				default: /* Parent - writes to pipe */
+					close(pipefds[0]); /* Read end is unused */
+					write(pipefds[1], notify->extra, strlen(notify->extra));
+					close(pipefds[1]);
+					break;
+			}
 
 			PQfreemem(notify);
 		}
@@ -126,7 +168,7 @@ begin_listen(PGconn *conn, const char *chan)
 
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
-		fprintf(stderr, "LISTEN command failed: %s", PQerrorMessage(conn));
+		fprintf(stderr, "LISTEN command failed: %s\n", PQerrorMessage(conn));
 		PQclear(res);
 		clean_and_die(conn);
 	}
