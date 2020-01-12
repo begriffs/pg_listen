@@ -6,7 +6,9 @@
 #include <string.h>
 #include <unistd.h>
 
-void		listen_forever(PGconn *, const char *, const char *, char **);
+void		listen_forever_print(PGconn *, const char *);
+void		listen_forever_exec(PGconn *, const char *, const char *, char **);
+void 		listen_poll(PGconn *, const char *);
 int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
 void		begin_listen(PGconn *, const char *);
@@ -18,6 +20,7 @@ main(int argc, char **argv)
 {
 	PGconn	   *conn;
 	char	   *chan;
+	char       *prog;
 
 	if (argc < 4)
 	{
@@ -39,7 +42,15 @@ main(int argc, char **argv)
 		fputs(PQerrorMessage(conn), stderr);
 		clean_and_die(conn);
 	}
-	listen_forever(conn, chan, argv[3], argv+3);
+
+	prog = argv[3];
+	if(*prog == '-')
+	{
+		fprintf(stderr, "No command given, sending notifications to stdout\n");
+		listen_forever_print(conn, chan);
+	} else {
+		listen_forever_exec(conn, chan, prog, argv+3);
+	}
 
 	/* should never get here */
 	PQfreemem(chan);
@@ -48,40 +59,50 @@ main(int argc, char **argv)
 }
 
 void
-listen_forever(PGconn *conn, const char *chan, const char *cmd, char **args)
+listen_forever_print(PGconn *conn, const char *chan)
 {
 	PGnotify   *notify;
-	int			sock;
-	int			pipefds[2];
-	struct pollfd pfd[1];
 
-	fprintf(stderr, "Listening for channel %s\n", chan);
 	begin_listen(conn, chan);
 
 	while (1)
 	{
-		if (reset_if_necessary(conn))
-			begin_listen(conn, chan);
+		listen_poll(conn, chan);
 
-		sock = PQsocket(conn);
-		if (sock < 0)
-		{
-			fprintf(stderr, "Failed to get libpq socket: %s\n",
-			        PQerrorMessage(conn));
-			clean_and_die(conn);
-		}
-
-		pfd[0].fd = sock;
-		pfd[0].events = POLLIN;
-		if (errno = 0, poll(pfd, 1, -1) < 0)
-		{
-			perror("poll()");
-			clean_and_die(conn);
-		}
-
-		PQconsumeInput(conn);
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
+			fprintf(stderr,
+			        "NOTIFY of '%s' received from backend PID %d\n",
+                    notify->relname, 
+                    notify->be_pid
+            );
+
+      		printf("%s\n", notify->extra);
+
+			PQfreemem(notify);
+		}
+	}
+}
+
+void
+listen_forever_exec(PGconn *conn, const char *chan, const char *cmd, char **args)
+{
+	PGnotify   *notify;
+	int			pipefds[2];
+
+	begin_listen(conn, chan);
+
+	while (1)
+	{
+		listen_poll(conn, chan);
+
+		while ((notify = PQnotifies(conn)) != NULL)
+		{
+			fprintf(stderr,
+			        "NOTIFY of '%s' received from backend PID %d\n",
+                    notify->relname, 
+                    notify->be_pid
+            );
 			/* we'll send NOTIFY payload through pipe to stdin */
 			if (errno = 0, pipe(pipefds) < 0)
 			{
@@ -130,6 +151,34 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd, char **args)
 	}
 }
 
+void
+listen_poll(PGconn *conn, const char *chan)
+{
+	int			sock;
+	struct pollfd pfd[1];
+
+	if (reset_if_necessary(conn))
+		begin_listen(conn, chan);
+
+	sock = PQsocket(conn);
+	if (sock < 0)
+	{
+		fprintf(stderr, "Failed to get libpq socket: %s\n",
+				PQerrorMessage(conn));
+		clean_and_die(conn);
+	}
+
+	pfd[0].fd = sock;
+	pfd[0].events = POLLIN;
+	if (errno = 0, poll(pfd, 1, -1) < 0)
+	{
+		perror("poll()");
+		clean_and_die(conn);
+	}
+
+	PQconsumeInput(conn);
+}
+
 int
 reset_if_necessary(PGconn *conn)
 {
@@ -161,6 +210,8 @@ begin_listen(PGconn *conn, const char *chan)
 {
 	PGresult   *res;
 	char		sql[7 + BUFSZ + 1];
+
+	fprintf(stderr, "Listening for channel %s\n", chan);
 
 	snprintf(sql, 7 + BUFSZ + 1, "LISTEN %s", chan);
 	res = PQexec(conn, sql);
