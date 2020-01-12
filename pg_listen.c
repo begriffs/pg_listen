@@ -18,14 +18,14 @@ void		begin_listen(PGconn *, const char *);
 int
 main(int argc, char **argv)
 {
-	PGconn	   *conn;
-	char	   *chan;
+	PGconn     *conn;
+	char       *chan;
 	char       *prog;
 
 	if (argc < 4)
 	{
 		fprintf(stderr, "USAGE: %s db-url channel /path/to/program [args]\n",
-		        argv[0]);
+				argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -46,7 +46,7 @@ main(int argc, char **argv)
 	prog = argv[3];
 	if(*prog == '-')
 	{
-		fprintf(stderr, "No command given, sending notifications to stdout\n");
+		fprintf(stderr, "No executable given, sending notifications to stdout\n");
 		listen_forever_print(conn, chan);
 	} else {
 		listen_forever_exec(conn, chan, prog, argv+3);
@@ -72,12 +72,12 @@ listen_forever_print(PGconn *conn, const char *chan)
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
 			fprintf(stderr,
-			        "NOTIFY of '%s' received from backend PID %d\n",
-                    notify->relname, 
-                    notify->be_pid
-            );
+					"NOTIFY of '%s' received from backend PID %d\n",
+					notify->relname, 
+					notify->be_pid
+			);
 
-      		printf("%s\n", notify->extra);
+			printf("%s\n", notify->extra);
 
 			PQfreemem(notify);
 		}
@@ -99,10 +99,10 @@ listen_forever_exec(PGconn *conn, const char *chan, const char *cmd, char **args
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
 			fprintf(stderr,
-			        "NOTIFY of '%s' received from backend PID %d\n",
-                    notify->relname, 
-                    notify->be_pid
-            );
+					"NOTIFY of '%s' received from backend PID %d\n",
+					notify->relname, 
+					notify->be_pid
+			);
 			/* we'll send NOTIFY payload through pipe to stdin */
 			if (errno = 0, pipe(pipefds) < 0)
 			{
