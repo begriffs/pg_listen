@@ -55,7 +55,7 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd, char **args)
 	int			pipefds[2];
 	struct pollfd pfd[1];
 
-	printf("Listening for channel %s\n", chan);
+	fprintf(stderr, "Listening for channel %s\n", chan);
 	begin_listen(conn, chan);
 
 	while (1)
@@ -144,15 +144,15 @@ reset_if_necessary(PGconn *conn)
 			seconds = 1;
 		else
 		{
-			printf("Failed.\nSleeping %d seconds.\n", seconds);
+			fprintf(stderr, "Failed.\nSleeping %d seconds.\n", seconds);
 			sleep(seconds);
 			seconds *= 2;
 		}
-		printf("Reconnecting to database...");
+		fprintf(stderr, "Reconnecting to database...");
 		PQreset(conn);
 	} while (PQstatus(conn) != CONNECTION_OK);
 
-	printf("Connected.\n");
+	fprintf(stderr, "Connected.\n");
 	return 1;
 }
 
