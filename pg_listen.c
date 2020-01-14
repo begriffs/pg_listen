@@ -31,6 +31,8 @@ main(int argc, char **argv)
 		printf("USAGE: %s db-url channel /path/to/program [args]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
+	
+	setbuf(stdout, NULL);
 
 	conn = PQconnectdb(argv[1]);
 	if (PQstatus(conn) != CONNECTION_OK)
@@ -75,7 +77,7 @@ listen_forever_print(PGconn *conn, const char *chan)
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
 			print_log_notify(notify);
-			printf("%s", notify->extra);
+			printf("%s\n", notify->extra);
 
 			PQfreemem(notify);
 		}
