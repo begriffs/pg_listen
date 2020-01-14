@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "log.h"
 
 void		listen_forever_print(PGconn *, const char *);
 void		listen_forever_exec(PGconn *, const char *, const char *, char **);
@@ -25,7 +24,7 @@ main(int argc, char **argv)
 
 	if (argc < 4)
 	{
-		log_info("USAGE: %s db-url channel /path/to/program [args]\n",
+		fprintf(stderr, "USAGE: %s db-url channel /path/to/program [args]\n",
 				argv[0]);
 		return EXIT_FAILURE;
 	}
@@ -46,11 +45,10 @@ main(int argc, char **argv)
 
 	prog = argv[3];
 	if(*prog == '-')
-	{	
-		listen_forever_print(conn, chan);
-	} 
-	else 
 	{
+		fprintf(stderr, "No executable given, sending notifications to stdout\n");
+		listen_forever_print(conn, chan);
+	} else {
 		listen_forever_exec(conn, chan, prog, argv+3);
 	}
 
@@ -65,8 +63,6 @@ listen_forever_print(PGconn *conn, const char *chan)
 {
 	PGnotify   *notify;
 
-	log_info("No executable given, sending notifications to stdout");
-
 	begin_listen(conn, chan);
 
 	while (1)
@@ -75,8 +71,8 @@ listen_forever_print(PGconn *conn, const char *chan)
 
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
-			log_info(
-					"NOTIFY of '%s' received from backend PID %d",
+			fprintf(stderr,
+					"NOTIFY of '%s' received from backend PID %d\n",
 					notify->relname, 
 					notify->be_pid
 			);
@@ -102,8 +98,8 @@ listen_forever_exec(PGconn *conn, const char *chan, const char *cmd, char **args
 
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
-			log_info(
-					"NOTIFY of '%s' received from backend PID %d",
+			fprintf(stderr,
+					"NOTIFY of '%s' received from backend PID %d\n",
 					notify->relname, 
 					notify->be_pid
 			);
@@ -136,8 +132,8 @@ listen_forever_exec(PGconn *conn, const char *chan, const char *cmd, char **args
 					}
 					if (errno = 0, execv(cmd, args) < 0)
 					{
-						log_fatal("Can't run %s: %s",
-						         cmd, strerror(errno));
+						fprintf(stderr, "Can't run %s: %s\n",
+						        cmd, strerror(errno));
 						close(pipefds[0]);
 						exit(EXIT_FAILURE);
 					}
@@ -167,7 +163,7 @@ listen_poll(PGconn *conn, const char *chan)
 	sock = PQsocket(conn);
 	if (sock < 0)
 	{
-		log_fatal("Failed to get libpq socket: %s",
+		fprintf(stderr, "Failed to get libpq socket: %s\n",
 				PQerrorMessage(conn));
 		clean_and_die(conn);
 	}
@@ -197,15 +193,15 @@ reset_if_necessary(PGconn *conn)
 			seconds = 1;
 		else
 		{
-			log_info("Failed.\nSleeping %d seconds.", seconds);
+			fprintf(stderr, "Failed.\nSleeping %d seconds.\n", seconds);
 			sleep(seconds);
 			seconds *= 2;
 		}
-		log_info("Reconnecting to database...");
+		fprintf(stderr, "Reconnecting to database...");
 		PQreset(conn);
 	} while (PQstatus(conn) != CONNECTION_OK);
 
-	log_info("Connected.");
+	fprintf(stderr, "Connected.\n");
 	return 1;
 }
 
@@ -215,14 +211,14 @@ begin_listen(PGconn *conn, const char *chan)
 	PGresult   *res;
 	char		sql[7 + BUFSZ + 1];
 
-	log_info("Listening for channel %s, chan");
+	fprintf(stderr, "Listening for channel %s\n", chan);
 
 	snprintf(sql, 7 + BUFSZ + 1, "LISTEN %s", chan);
 	res = PQexec(conn, sql);
 
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
-		log_fatal("LISTEN command failed: %s, PQerrorMessage(conn)");
+		fprintf(stderr, "LISTEN command failed: %s\n", PQerrorMessage(conn));
 		PQclear(res);
 		clean_and_die(conn);
 	}
