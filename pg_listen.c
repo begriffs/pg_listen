@@ -1,15 +1,18 @@
 #include <errno.h>
 #include <libpq-fe.h>
 #include <poll.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 void		listen_forever(PGconn *, const char *, const char *, char **);
 int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
 void		begin_listen(PGconn *, const char *);
+int			print_log(const char *, const char *, ...);
 
 #define		BUFSZ 512
 
@@ -111,7 +114,7 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd, char **args)
 					}
 					if (errno = 0, execv(cmd, args) < 0)
 					{
-						fprintf(stderr, "Can't run %s: %s\n",
+						print_log("CRITICAL", "Can't run %s: %s",
 						        cmd, strerror(errno));
 						close(pipefds[0]);
 						exit(EXIT_FAILURE);
@@ -144,15 +147,15 @@ reset_if_necessary(PGconn *conn)
 			seconds = 1;
 		else
 		{
-			printf("Failed.\nSleeping %d seconds.\n", seconds);
+			print_log("ERROR", "Failed.\nSleeping %d seconds.", seconds);
 			sleep(seconds);
 			seconds *= 2;
 		}
-		printf("Reconnecting to database...");
+		print_log("INFO", "Reconnecting to database...");
 		PQreset(conn);
 	} while (PQstatus(conn) != CONNECTION_OK);
 
-	printf("Connected.\n");
+	print_log("INFO", "Connected.");
 	return 1;
 }
 
@@ -162,12 +165,15 @@ begin_listen(PGconn *conn, const char *chan)
 	PGresult   *res;
 	char		sql[7 + BUFSZ + 1];
 
+
+	print_log("INFO", "Listening for channel %s", chan);
+
 	snprintf(sql, 7 + BUFSZ + 1, "LISTEN %s", chan);
 	res = PQexec(conn, sql);
 
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
-		fprintf(stderr, "LISTEN command failed: %s\n", PQerrorMessage(conn));
+		print_log("CRITICAL", "LISTEN command failed: %s", PQerrorMessage(conn));
 		PQclear(res);
 		clean_and_die(conn);
 	}
@@ -179,4 +185,22 @@ clean_and_die(PGconn *conn)
 {
 	PQfinish(conn);
 	exit(EXIT_FAILURE);
+}
+
+int
+print_log(const char *sev, const char *fmt, ...)
+{
+	va_list	args;
+	time_t	now = time(NULL);
+	char	timestamp[128];
+	int		res;
+
+	strftime(timestamp, sizeof timestamp, "%Y-%m-%dT%H:%M:%S", gmtime(&now));
+	res = fprintf(stderr, "%s - pg_listen - %s - ", timestamp, sev);
+
+	va_start(args, fmt);
+	res = res + vfprintf(stderr, fmt, args);
+	va_end(args);
+
+	return res + fprintf(stderr, "\n");
 }
