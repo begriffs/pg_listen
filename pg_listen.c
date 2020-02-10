@@ -38,14 +38,14 @@ main(int argc, char **argv)
 	conn = PQconnectdb(argv[1]);
 	if (PQstatus(conn) != CONNECTION_OK)
 	{
-		fputs(PQerrorMessage(conn), stderr);
+		print_log("CRITICAL", PQerrorMessage(conn));
 		clean_and_die(conn);
 	}
 
 	chan = PQescapeIdentifier(conn, argv[2], BUFSZ);
 	if (chan == NULL)
 	{
-		fputs(PQerrorMessage(conn), stderr);
+		print_log("CRITICAL", PQerrorMessage(conn));
 		clean_and_die(conn);
 	}
 
@@ -55,7 +55,7 @@ main(int argc, char **argv)
 	/* should never get here */
 	PQfreemem(chan);
 	PQfinish(conn);
-	return 0;
+	return EXIT_SUCCESS;
 }
 
 int
@@ -66,14 +66,14 @@ exec_pipe(const char *cmd, char **cmd_argv, const char *input)
 	/* we'll send "input" through pipe to stdin */
 	if (errno = 0, pipe(pipefds) < 0)
 	{
-		perror("pipe()");
+		print_log("ERROR", "pipe(): %s", strerror(errno));
 		return 0;
 	}
 
 	switch (errno = 0, fork())
 	{
 		case -1:
-			perror("fork()");
+			print_log("ERROR", "fork(): %s", strerror(errno));
 			close(pipefds[0]);
 			close(pipefds[1]);
 			return 0;
@@ -83,13 +83,15 @@ exec_pipe(const char *cmd, char **cmd_argv, const char *input)
 			/* read from pipe as stdin */
 			if (errno = 0, dup2(pipefds[0], STDIN_FILENO) < 0)
 			{
-				perror("Unable to assign stdin to pipe");
+				print_log("ERROR",
+						"Unable to assign stdin to pipe: %s",
+						strerror(errno));
 				close(pipefds[0]);
 				exit(EXIT_FAILURE);
 			}
 			if (errno = 0, execv(cmd, cmd_argv) < 0)
 			{
-				print_log("CRITICAL", "Can't run %s: %s",
+				print_log("ERROR", "execv(%s): %s",
 						cmd, strerror(errno));
 				close(pipefds[0]);
 				exit(EXIT_FAILURE);
@@ -122,8 +124,9 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd, char **cmd_argv)
 		sock = PQsocket(conn);
 		if (sock < 0)
 		{
-			fprintf(stderr, "Failed to get libpq socket: %s\n",
-			        PQerrorMessage(conn));
+			print_log("CRITICAL",
+					"Failed to get libpq socket: %s\n",
+					PQerrorMessage(conn));
 			clean_and_die(conn);
 		}
 
@@ -131,7 +134,7 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd, char **cmd_argv)
 		pfd[0].events = POLLIN;
 		if (errno = 0, poll(pfd, 1, -1) < 0)
 		{
-			perror("poll()");
+			print_log("CRITICAL", "poll(): %s", strerror(errno));
 			clean_and_die(conn);
 		}
 
@@ -173,7 +176,6 @@ reset_if_necessary(PGconn *conn)
 		PQreset(conn);
 	} while (PQstatus(conn) != CONNECTION_OK);
 
-	print_log("INFO", "Connected.");
 	return 1;
 }
 
@@ -183,7 +185,7 @@ begin_listen(PGconn *conn, const char *chan)
 	PGresult   *res;
 	char		sql[7 + BUFSZ + 1];
 
-	print_log("INFO", "Listening for channel %s", chan);
+	print_log("INFO", "Listening on channel %s", chan);
 
 	snprintf(sql, 7 + BUFSZ + 1, "LISTEN %s", chan);
 	res = PQexec(conn, sql);
