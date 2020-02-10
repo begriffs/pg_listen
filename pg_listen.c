@@ -13,6 +13,7 @@ int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
 void		begin_listen(PGconn *, const char *);
 int			print_log(const char *, const char *, ...);
+int			exec_pipe(const char *cmd, char **cmd_argv, const char *input);
 
 #define		BUFSZ 512
 
@@ -22,12 +23,17 @@ main(int argc, char **argv)
 	PGconn	   *conn;
 	char	   *chan;
 
-	if (argc < 4)
+	if (argc < 3)
 	{
-		fprintf(stderr, "USAGE: %s db-url channel /path/to/program [args]\n",
-		        argv[0]);
+		fprintf(stderr,
+				"USAGE: %s db-url channel [/path/to/program] [args]\n",
+				argv[0]);
 		return EXIT_FAILURE;
 	}
+
+	/* if no command given, print payload with line buffering */
+	if (argc == 3)
+		setvbuf(stdout, NULL, _IOLBF, 0);
 
 	conn = PQconnectdb(argv[1]);
 	if (PQstatus(conn) != CONNECTION_OK)
@@ -42,6 +48,8 @@ main(int argc, char **argv)
 		fputs(PQerrorMessage(conn), stderr);
 		clean_and_die(conn);
 	}
+
+	/* safe since argv[argc] == NULL by C99 5.1.2.2.1 */
 	listen_forever(conn, chan, argv[3], argv+3);
 
 	/* should never get here */
@@ -50,15 +58,60 @@ main(int argc, char **argv)
 	return 0;
 }
 
-void
-listen_forever(PGconn *conn, const char *chan, const char *cmd, char **args)
+int
+exec_pipe(const char *cmd, char **cmd_argv, const char *input)
 {
-	PGnotify   *notify;
-	int			sock;
 	int			pipefds[2];
+
+	/* we'll send "input" through pipe to stdin */
+	if (errno = 0, pipe(pipefds) < 0)
+	{
+		perror("pipe()");
+		return 0;
+	}
+
+	switch (errno = 0, fork())
+	{
+		case -1:
+			perror("fork()");
+			close(pipefds[0]);
+			close(pipefds[1]);
+			return 0;
+		case 0: /* Child - reads from pipe */
+			/* Write end is unused */
+			close(pipefds[1]);
+			/* read from pipe as stdin */
+			if (errno = 0, dup2(pipefds[0], STDIN_FILENO) < 0)
+			{
+				perror("Unable to assign stdin to pipe");
+				close(pipefds[0]);
+				exit(EXIT_FAILURE);
+			}
+			if (errno = 0, execv(cmd, cmd_argv) < 0)
+			{
+				print_log("CRITICAL", "Can't run %s: %s",
+						cmd, strerror(errno));
+				close(pipefds[0]);
+				exit(EXIT_FAILURE);
+			}
+			/* should not get here */
+			break;
+		default: /* Parent - writes to pipe */
+			close(pipefds[0]); /* Read end is unused */
+			write(pipefds[1], input, strlen(input));
+			close(pipefds[1]);
+			break;
+	}
+	return 1;
+}
+
+void
+listen_forever(PGconn *conn, const char *chan, const char *cmd, char **cmd_argv)
+{
+	int			sock;
+	PGnotify   *notify;
 	struct pollfd pfd[1];
 
-	printf("Listening for channel %s\n", chan);
 	begin_listen(conn, chan);
 
 	while (1)
@@ -85,47 +138,12 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd, char **args)
 		PQconsumeInput(conn);
 		while ((notify = PQnotifies(conn)) != NULL)
 		{
-			/* we'll send NOTIFY payload through pipe to stdin */
-			if (errno = 0, pipe(pipefds) < 0)
+			if (!cmd)
+				fputs(notify->extra, stdout);
+			else if (!exec_pipe(cmd, cmd_argv, notify->extra))
 			{
-				perror("pipe()");
 				PQfreemem(notify);
 				clean_and_die(conn);
-			}
-
-			switch (errno = 0, fork())
-			{
-				case -1:
-					perror("fork()");
-					PQfreemem(notify);
-					close(pipefds[0]);
-					close(pipefds[1]);
-					clean_and_die(conn);
-					break;
-				case 0: /* Child - reads from pipe */
-					/* Write end is unused */
-					close(pipefds[1]);
-					/* read from pipe as stdin */
-					if (errno = 0, dup2(pipefds[0], STDIN_FILENO) < 0)
-					{
-						perror("Unable to assign stdin to pipe");
-						close(pipefds[0]);
-						exit(EXIT_FAILURE);
-					}
-					if (errno = 0, execv(cmd, args) < 0)
-					{
-						print_log("CRITICAL", "Can't run %s: %s",
-						        cmd, strerror(errno));
-						close(pipefds[0]);
-						exit(EXIT_FAILURE);
-					}
-					/* should not get here */
-					break;
-				default: /* Parent - writes to pipe */
-					close(pipefds[0]); /* Read end is unused */
-					write(pipefds[1], notify->extra, strlen(notify->extra));
-					close(pipefds[1]);
-					break;
 			}
 
 			PQfreemem(notify);
@@ -147,7 +165,7 @@ reset_if_necessary(PGconn *conn)
 			seconds = 1;
 		else
 		{
-			print_log("ERROR", "Failed.\nSleeping %d seconds.", seconds);
+			print_log("ERROR", "Connection failed.\nSleeping %u seconds.", seconds);
 			sleep(seconds);
 			seconds *= 2;
 		}
@@ -164,7 +182,6 @@ begin_listen(PGconn *conn, const char *chan)
 {
 	PGresult   *res;
 	char		sql[7 + BUFSZ + 1];
-
 
 	print_log("INFO", "Listening for channel %s", chan);
 
@@ -190,7 +207,7 @@ clean_and_die(PGconn *conn)
 int
 print_log(const char *sev, const char *fmt, ...)
 {
-	va_list	args;
+	va_list	ap;
 	time_t	now = time(NULL);
 	char	timestamp[128];
 	int		res;
@@ -198,9 +215,9 @@ print_log(const char *sev, const char *fmt, ...)
 	strftime(timestamp, sizeof timestamp, "%Y-%m-%dT%H:%M:%S", gmtime(&now));
 	res = fprintf(stderr, "%s - pg_listen - %s - ", timestamp, sev);
 
-	va_start(args, fmt);
-	res = res + vfprintf(stderr, fmt, args);
-	va_end(args);
+	va_start(ap, fmt);
+	res += vfprintf(stderr, fmt, ap);
+	va_end(ap);
 
 	return res + fprintf(stderr, "\n");
 }
