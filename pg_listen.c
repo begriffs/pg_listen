@@ -12,7 +12,7 @@ void		listen_forever(PGconn *, const char *, const char *, char **);
 int			reset_if_necessary(PGconn *);
 void		clean_and_die(PGconn *);
 void		begin_listen(PGconn *, const char *);
-int			print_log(const char *, const char *, ...);
+int			print_log(const char *, const char *,...);
 int			exec_pipe(const char *cmd, char **cmd_argv, const char *input);
 
 #define		BUFSZ 512
@@ -50,7 +50,7 @@ main(int argc, char **argv)
 	}
 
 	/* safe since argv[argc] == NULL by C99 5.1.2.2.1 */
-	listen_forever(conn, chan, argv[3], argv+3);
+	listen_forever(conn, chan, argv[3], argv + 3);
 
 	/* should never get here */
 	PQfreemem(chan);
@@ -77,29 +77,29 @@ exec_pipe(const char *cmd, char **cmd_argv, const char *input)
 			close(pipefds[0]);
 			close(pipefds[1]);
 			return 0;
-		case 0: /* Child - reads from pipe */
+		case 0:					/* Child - reads from pipe */
 			/* Write end is unused */
 			close(pipefds[1]);
 			/* read from pipe as stdin */
 			if (errno = 0, dup2(pipefds[0], STDIN_FILENO) < 0)
 			{
 				print_log("ERROR",
-						"Unable to assign stdin to pipe: %s",
-						strerror(errno));
+						  "Unable to assign stdin to pipe: %s",
+						  strerror(errno));
 				close(pipefds[0]);
 				exit(EXIT_FAILURE);
 			}
 			if (errno = 0, execv(cmd, cmd_argv) < 0)
 			{
 				print_log("ERROR", "execv(%s): %s",
-						cmd, strerror(errno));
+						  cmd, strerror(errno));
 				close(pipefds[0]);
 				exit(EXIT_FAILURE);
 			}
 			/* should not get here */
 			break;
-		default: /* Parent - writes to pipe */
-			close(pipefds[0]); /* Read end is unused */
+		default:				/* Parent - writes to pipe */
+			close(pipefds[0]);	/* Read end is unused */
 			write(pipefds[1], input, strlen(input));
 			close(pipefds[1]);
 			break;
@@ -125,8 +125,8 @@ listen_forever(PGconn *conn, const char *chan, const char *cmd, char **cmd_argv)
 		if (sock < 0)
 		{
 			print_log("CRITICAL",
-					"Failed to get libpq socket: %s\n",
-					PQerrorMessage(conn));
+					  "Failed to get libpq socket: %s\n",
+					  PQerrorMessage(conn));
 			clean_and_die(conn);
 		}
 
@@ -207,12 +207,12 @@ clean_and_die(PGconn *conn)
 }
 
 int
-print_log(const char *sev, const char *fmt, ...)
+print_log(const char *sev, const char *fmt,...)
 {
-	va_list	ap;
-	time_t	now = time(NULL);
-	char	timestamp[128];
-	int		res;
+	va_list		ap;
+	time_t		now = time(NULL);
+	char		timestamp[128];
+	int			res;
 
 	strftime(timestamp, sizeof timestamp, "%Y-%m-%dT%H:%M:%S", gmtime(&now));
 	res = fprintf(stderr, "%s - pg_listen - %s - ", timestamp, sev);
