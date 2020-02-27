@@ -15,6 +15,18 @@ pg_listen postgres://db-uri channel [/path/to/program] [args]
 # pg_listen postgres://localhost/postgres fun
 ```
 
+Note that pg\_listen line-buffers its output, so the payload raised by NOTIFY
+needs to include a final newline ("\n"). The program won't output anything
+until a newline is encountered.
+
+```sql
+-- incorrect
+NOTIFY foo, 'hi';
+
+-- correct
+NOTIFY foo, E'hi\n';
+```
+
 ### Building
 
 Just clone the repo and run `make`. The makefile is compatible with BSD and GNU
