@@ -1,0 +1,10 @@
+#!/bin/sh -eu
+
+rm -f config.mk
+
+pkg-config --print-errors libpq
+cat >> config.mk <<-EOF
+	CFLAGS += $(pkg-config --cflags libpq)
+	LDFLAGS += $(pkg-config --libs-only-L libpq)
+	LDLIBS += $(pkg-config --libs-only-l libpq)
+EOF

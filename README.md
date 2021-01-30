@@ -29,13 +29,17 @@ NOTIFY foo, E'hi\n';
 
 ### Building
 
-Just clone the repo and run `make`. The makefile is compatible with BSD and GNU
-Make and requires only that libpq be installed on the system.
+Requirements:
 
-If you use NixOS you can run `nix-shell` to build it.
+* PostgreSQL and
+  [libpq](https://www.postgresql.org/docs/current/libpq-build.html).
+* [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
+* `$PKG_CONFIG_PATH` including the directory containing `libpq.pc`
+* C89 and POSIX
 
-If you installed PostgreSQL on Mac using homebrew or Macports, note that
-pkg-config is not installed by default and needs to be installed by running
-`brew install pkg-config` prior to running `make`. Additionally you may need to
-update `$PKG_CONFIG_PATH` and add the directory containing `libpq.pc` for your
-system.
+Just clone the repo and run:
+
+```sh
+./configure
+make
+```
